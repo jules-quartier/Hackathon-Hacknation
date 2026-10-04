@@ -5,6 +5,6 @@ You receive the flight metrics, all measured from the recording, and the last me
 Write:
 - key_maneuvers: 3 to 5 short sentences on the significant actions of the flight (inspections, road crossings, close calls, defects found).
 - operational_summary: one paragraph on how the flight went: coverage, defects found or missed, safety (closest cable approach, violations, predicted conflicts, Guardian interventions in novice mode, low road crossings), and in expert mode what the apprentice learned.
-- coaching_points: 2 or 3 concrete, actionable improvements for the next flight.
+- coaching_points: 2 or 3 concrete, actionable improvements for the next flight. In novice mode, base them on mastery.practice (the expert rules the novice did not apply, with why) and say what the expert does instead.
 
 Use only the numbers given; never invent a measurement. Plain English, no markdown.

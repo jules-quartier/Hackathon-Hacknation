@@ -12,6 +12,8 @@ from pydantic import BaseModel
 
 from backend.core.config import ELEVENLABS_API_KEY, ELEVENLABS_STT_MODEL, ELEVENLABS_VOICE_ID
 from backend.api.observer import observe_once
+from backend.api.ws import broadcast
+from backend.core.privacy import redact
 from backend.core.state import runtime
 
 logger = logging.getLogger("robot-apprentice.dialogue")
@@ -57,6 +59,8 @@ async def trigger_question() -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not configured on the server.")
     if not runtime.session_active:
         raise HTTPException(status_code=409, detail="No flight in progress: press Start Flight first.")
+    if runtime.off_record:
+        raise HTTPException(status_code=409, detail="Off the record: the apprentice is not asking anything.")
     if runtime.observer_busy:
         raise HTTPException(status_code=409, detail="The observer is already thinking; try again in a moment.")
     payload = await observe_once(force=True)
@@ -87,6 +91,11 @@ async def _process_answer(question: str, answer: str) -> dict[str, Any]:
     """An answer to the apprentice's question, or (empty question) a note the pilot volunteered."""
     t = runtime.drone.elapsed_time
     note = not question.strip()
+    answer = redact(answer)  # personal data never reaches the model or the files
+    if runtime.off_record:
+        if not note:
+            _close_pending_question("(off the record)")
+        return {"ok": True, "question": question, "answer": answer, "insight": None, "rejected": True, "off_record": True}
     qa = None if note else _close_pending_question(answer)
     if not qa or qa["question"] != question:
         qa = {}  # no matching question: the knowledge manager picks the slot
@@ -102,7 +111,8 @@ async def _process_answer(question: str, answer: str) -> dict[str, Any]:
         measured=measured,
         measured_task=measured_task,
         session=runtime.recorder.session_id if runtime.recorder else None,
-        t=t,
+        t=qa.get("t", t),  # the moment the question was about, for the Work Map and the tutor's replays
+        phase="note" if note else "live",
     )
 
     if note:  # the observer sees it, so it won't ask about what the pilot just explained
@@ -143,7 +153,7 @@ def _transcribe(audio: bytes, content_type: str) -> str:
         files={"file": ("answer", audio, content_type)},
     )
     resp.raise_for_status()
-    return resp.json().get("text", "").strip()
+    return redact(resp.json().get("text", "").strip())
 
 
 async def _transcribe_request(request: Request) -> str:
@@ -174,6 +184,23 @@ async def pilot_note(active: bool) -> dict[str, Any]:
     return {"ok": True}
 
 
+@router.post("/dialogue/off-record")
+async def off_record(active: bool) -> dict[str, Any]:
+    """Expert: take the next part of the flight off the record (no questions, frames or learning)."""
+    if not runtime.session_active:
+        raise HTTPException(status_code=409, detail="No flight in progress")
+    if active:
+        runtime.open_off_record()
+        _close_pending_question("(off the record)")
+        runtime.pending_follow_up = None
+        runtime.pending_deviation = None
+        runtime.camera.reset()  # the last frame must not reach the model either
+    else:
+        runtime.close_off_record()
+    await broadcast({"type": "off_record", "active": runtime.off_record, "windows": runtime.off_record_windows})
+    return {"ok": True, "active": runtime.off_record, "windows": runtime.off_record_windows}
+
+
 @router.post("/dialogue/voice-answer")
 async def receive_voice_answer(request: Request, question: str = "") -> dict[str, Any]:
     """Body = the recorded audio: an answer to `question`, or the pilot's own note if it is empty.
@@ -199,6 +226,7 @@ async def _advise(query: str | None, event: dict[str, Any] | None = None) -> dic
     telemetry = runtime.drone.snapshot()
     frame = runtime.camera.get_latest_frame()
 
+    query = redact(query) if query else query
     advice = await asyncio.to_thread(
         runtime.advisor.advise,
         telemetry=telemetry,

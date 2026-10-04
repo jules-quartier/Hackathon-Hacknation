@@ -3,17 +3,27 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api import dialogue_router, knowledge_router, session_router, ws_router, broadcast
+from backend.api import debrief_router, dialogue_router, knowledge_router, session_router, teach_router, ws_router, broadcast
 from backend.api.observer import observer_loop
-from backend.core.config import BROADCAST_HZ, PREDICT_HZ, SIM_HZ
+from backend.core.config import (
+    BROADCAST_HZ,
+    PREDICT_HZ,
+    PREDICT_MAX_PER_FLIGHT,
+    PREDICT_MIN_GAP_S,
+    QUIET_AFTER_SPEECH_S,
+    SIM_HZ,
+)
 from backend.core.state import runtime
 from backend.llm import usage
-from backend.llm.advisor import coaching_hint, predictive_alert, safety_alert
+from backend.llm.advisor import attach_expert_moment, coaching_hint, predictive_alert, safety_alert
+from backend.llm.teach import prediction_question
+from backend.sim.flight_log import COLUMNS
 from backend.sim.predictor import ACTIONS
 from backend.sim.scene import scene_json
 from backend.storage import competence_store
@@ -44,6 +54,8 @@ app.add_middleware(
 app.include_router(session_router)
 app.include_router(dialogue_router)
 app.include_router(knowledge_router)
+app.include_router(debrief_router)
+app.include_router(teach_router)
 app.include_router(ws_router)
 
 
@@ -77,10 +89,17 @@ async def _send_advice(advice: dict[str, Any], t: float) -> None:
         })
 
 
+def _tutor_must_wait(t: float) -> bool:
+    """A tip would talk over the novice, or over a question they are answering."""
+    return runtime.open_prediction is not None or runtime.pilot_quiet_for(t) < QUIET_AFTER_SPEECH_S
+
+
 async def _handle_novice_event(ev: dict[str, Any], telemetry: dict[str, Any]) -> None:
     now = time.time()
     if ev.get("type") == "hover_start" and telemetry.get("insulator_dist", 99.0) > 8.0:
         return  # a pause away from the work: nothing to coach
+    if _tutor_must_wait(telemetry["t"]):
+        return
     if ev.get("type") in ADVICE_TRIGGER_EVENTS and (now - runtime.last_advice_time > ADVICE_MIN_GAP_S):
         runtime.last_advice_time = now
         epoch = runtime.session_epoch
@@ -112,7 +131,91 @@ async def _speak_alert(alert: dict[str, Any], t: float, always: bool = False) ->
     runtime.last_safety_time = now
     runtime.last_safety_urgency = alert["urgency"]
     runtime.last_advice_time = now  # the next tip waits instead of talking over the alert
+    alert = attach_expert_moment(alert)  # the expert's rule, words and screen moment for this situation
+    topic = alert.get("caught")
+    if topic and alert.get("replay") and f"why:{topic}" not in runtime.predict_asked:
+        runtime.pending_why = {"topic": topic, "t": t}  # once it is calm: "why would the expert not...?"
+    if runtime.open_prediction is not None:
+        runtime.open_prediction = None  # safety first: the question being answered is dropped
     await _send_advice(alert, t)
+
+
+PREDICT_CHECK_S = 0.5
+WHY_DELAY_S = 4.0
+PREDICT_ANSWER_TIMEOUT_S = 30.0
+_last_predict_check = -1e9
+
+
+def _closing(column: str, over_s: float = 1.0) -> float:
+    """How much the distance in `column` shrank over the last second (m, positive = getting closer)."""
+    rows = runtime.flight_log.rows
+    n = int(over_s * runtime.flight_log.record_hz)
+    if len(rows) <= n:
+        return 0.0
+    i = COLUMNS.index(column)
+    return float(rows[-n - 1][i] - rows[-1][i])
+
+
+def _decision_point(state: dict[str, Any]) -> tuple[str, str, bool] | None:
+    """(topic, target, why) of the decision the novice is about to make, or None."""
+    t = state["t"]
+    why = runtime.pending_why
+    if why and t - why["t"] >= WHY_DELAY_S:
+        runtime.pending_why = None
+        return why["topic"], "", True
+    if why:
+        return None  # a caught mistake is waiting for its "why" question
+    defect = next((e for e in reversed(runtime.flight_log.events[-20:]) if e.get("type") == "defect_spotted"), None)
+    if defect and t - float(defect["t"]) < 8.0 and state["speed"] < 1.5:
+        return "defect", str(defect.get("label", "a defect")).lower(), False
+    if 10.0 < state["road_dist"] < 30.0 and (_closing("road_dist") > 0.5 or state["speed"] < 0.6):
+        return "road", "", False
+    ins = state.get("nearest_insulator")
+    if ins and ins not in runtime.detector.inspected and 6.0 < state["insulator_dist"] < 14.0 and _closing("insulator_dist") > 0.3:
+        return "insulator", ins, False
+    if 8.0 < state["pylon_dist"] < 15.0 and _closing("pylon_dist") > 0.5:
+        return "tower", "", False
+    if 6.0 < state["tree_dist"] < 12.0 and _closing("tree_dist") > 0.5:
+        return "tree", "", False
+    return None
+
+
+async def _check_predictions(state: dict[str, Any]) -> None:
+    """Novice: before a decision point, ask what the expert would do; after a caught mistake, why."""
+    global _last_predict_check
+    t = state["t"]
+    if t - _last_predict_check < PREDICT_CHECK_S and t >= _last_predict_check:
+        return
+    _last_predict_check = t
+    q = runtime.open_prediction
+    if q and t - q["t"] > PREDICT_ANSWER_TIMEOUT_S:
+        runtime.open_prediction = q = None  # never answered
+    risky = (runtime.flight_log.prediction or {}).get("risk") in ("medium", "high")
+    if (q or state["altitude"] < 1.0 or risky
+            or len([k for k in runtime.predict_asked if not k.startswith("none:")]) >= PREDICT_MAX_PER_FLIGHT
+            or t - runtime.last_predict_time < PREDICT_MIN_GAP_S and not runtime.pending_why
+            or time.time() - runtime.last_safety_time < 5.0
+            or runtime.pilot_quiet_for(t) < QUIET_AFTER_SPEECH_S):
+        return
+    point = _decision_point(state)
+    if point is None:
+        return
+    topic, target, why = point
+    key = f"{'why' if why else 'predict'}:{topic}"
+    if key in runtime.predict_asked or f"none:{key}" in runtime.predict_asked:
+        return
+    question = prediction_question(topic, target, why=why)
+    if question is None:
+        runtime.predict_asked.add(f"none:{key}")  # no expert rule to judge the answer against
+        return
+    runtime.predict_asked.add(key)
+    runtime.last_predict_time = t
+    runtime.last_advice_time = time.time()  # tips wait while the novice thinks
+    runtime.open_prediction = {**question, "id": uuid.uuid4().hex[:8], "t": t}
+    await broadcast({"type": "predict", **runtime.open_prediction})
+    if runtime.recorder:
+        runtime.recorder.record_transcript({"role": "tutor_model", "kind": question["kind"], "text": question["question"],
+                                            "slot": question["slot"], "t": t})
 
 
 async def _check_novice_safety(state: dict[str, Any]) -> None:
@@ -176,7 +279,9 @@ async def _sim_step(dt: float, tick: int, predict_every: int) -> tuple[dict[str,
 
     if novice:
         await _check_novice_safety(state)
-        if state["altitude"] > 0.4 and time.time() - runtime.last_advice_time > COACHING_IDLE_S:
+        await _check_predictions(state)
+        if (state["altitude"] > 0.4 and time.time() - runtime.last_advice_time > COACHING_IDLE_S
+                and not _tutor_must_wait(state["t"])):
             runtime.last_advice_time = time.time()
             await _send_advice(coaching_hint(runtime.mission_context()), state["t"])
 

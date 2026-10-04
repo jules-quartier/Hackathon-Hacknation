@@ -35,8 +35,16 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             elif msg_type == "frame":
                 b64 = data.get("frame_b64")
                 sim_t = float(data.get("t", runtime.drone.elapsed_time))
-                if b64:
+                if b64 and not runtime.off_record:  # off the record: the AI sees nothing
                     runtime.camera.set_frame(b64, sim_t)
+                    if runtime.recorder:  # kept for the Work Map's screen moments and the tutor's replays
+                        runtime.recorder.save_frame(sim_t, b64)
+            elif msg_type == "voice":
+                # browser voice-activity detection: the pilot started or stopped talking
+                speaking = bool(data.get("speaking"))
+                if runtime.pilot_speaking and not speaking:
+                    runtime.pilot_speech_end = runtime.drone.elapsed_time
+                runtime.pilot_speaking = speaking
             elif msg_type == "ping":
                 await websocket.send_json({"type": "pong"})
 

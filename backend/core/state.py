@@ -10,9 +10,11 @@ from fastapi import WebSocket
 from backend.llm import usage
 from backend.llm.advisor import Advisor
 from backend.llm.comparator import FlightComparator
+from backend.llm.debrief import DebriefAgent
 from backend.llm.knowledge_manager import KnowledgeManager
 from backend.llm.observer import FlightObserver
 from backend.llm.summarizer import FlightSummarizer
+from backend.llm.teach import PredictionCoach
 from backend.sim.camera import CameraManager
 from backend.sim.defects import generate_defects
 from backend.sim.detector import EventDetector
@@ -43,6 +45,8 @@ class SimRuntime:
     advisor: Advisor = field(default_factory=Advisor)
     summarizer: FlightSummarizer = field(default_factory=FlightSummarizer)
     comparator: FlightComparator = field(default_factory=FlightComparator)
+    debrief: DebriefAgent = field(init=False)  # spoken debrief after an expert flight (Module 2)
+    coach: PredictionCoach = field(default_factory=PredictionCoach)  # novice predictions (Module 3)
 
     # Active dialogue states
     latest_question: dict[str, Any] | None = None
@@ -66,6 +70,18 @@ class SimRuntime:
     attention_last_try: dict[str, float] = field(default_factory=dict)
     attention: dict[str, Any] | None = None
     last_observer_call: float = -999.0
+    # the pilot is talking (browser voice-activity detection): the AI waits until they are silent
+    pilot_speaking: bool = False
+    pilot_speech_end: float = -999.0  # sim time the pilot last stopped talking
+    # off the record (expert): no questions, no frames, no learning until switched back on
+    off_record: bool = False
+    off_record_since: float | None = None
+    off_record_windows: list[list[float]] = field(default_factory=list)
+    # novice: "what would the expert do here?" questions, {"id", "slot", "question", "t", "trigger"}
+    predict_asked: set[str] = field(default_factory=set)
+    last_predict_time: float = -999.0
+    open_prediction: dict[str, Any] | None = None
+    pending_why: dict[str, Any] | None = None  # after a caught mistake: "why would the expert not..." {"topic", "t"}
     # novice-mode Guardian: takes the sticks for a moment when the predictor sees an imminent crash
     guardian_enabled: bool = True
     guardian_interventions: int = 0
@@ -73,6 +89,7 @@ class SimRuntime:
     session_epoch: int = 0
 
     def __post_init__(self) -> None:
+        self.debrief = DebriefAgent(knowledge=self.knowledge_manager)
         self.scene.defects = generate_defects(self.scene)
         self.drone = DroneSim(self.scene)
         self.detector = EventDetector(self.scene)
@@ -97,7 +114,30 @@ class SimRuntime:
         self.pending_deviation = None
         self.pilot_note_since = None
         self.attention = None
+        self.close_off_record()
+        if recorder and self.off_record_windows:
+            recorder.update_meta(off_record=self.off_record_windows)
+        self.open_prediction = None
+        self.pending_why = None
+        self.pilot_speaking = False
         return recorder
+
+    def open_off_record(self) -> None:
+        if not self.off_record:
+            self.off_record = True
+            self.off_record_since = self.drone.elapsed_time
+
+    def close_off_record(self) -> None:
+        if self.off_record and self.off_record_since is not None:
+            self.off_record_windows.append([round(self.off_record_since, 1), round(self.drone.elapsed_time, 1)])
+            if self.recorder:
+                self.recorder.update_meta(off_record=self.off_record_windows)
+        self.off_record = False
+        self.off_record_since = None
+
+    def pilot_quiet_for(self, t: float) -> float:
+        """Seconds since the pilot last spoke (0 while they are talking)."""
+        return 0.0 if self.pilot_speaking else max(0.0, t - self.pilot_speech_end)
 
     def reset(self, mode: str = "expert") -> None:
         self.session_epoch += 1
@@ -116,6 +156,15 @@ class SimRuntime:
         self.attention = None
         self.last_observer_call = -999.0
         self.guardian_interventions = 0
+        self.pilot_speaking = False
+        self.pilot_speech_end = -999.0
+        self.off_record = False
+        self.off_record_since = None
+        self.off_record_windows = []
+        self.predict_asked.clear()
+        self.last_predict_time = -999.0
+        self.open_prediction = None
+        self.pending_why = None
         usage.reset_flight()
         self.qa_history.clear()
         self.observer_busy = False

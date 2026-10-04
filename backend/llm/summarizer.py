@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from backend.core.config import CABLE_DANGER_M, DEBRIEF_MODEL, ROAD_MIN_CROSSING_ALT_M, SESSIONS_DIR
 from backend.llm.client import LLMClient
+from backend.llm.teach import mastery
 from backend.sim.scene import Scene
 from backend.storage import competence_store
 from backend.storage.session_recorder import load_jsonl
@@ -100,6 +101,8 @@ def compute_metrics(session_id: str) -> dict[str, Any]:
         "notes_recorded": sum(1 for r in transcript if r.get("role") == "expert_operator" and r.get("kind") == "note"),
         "knowledge_learned": learned,
         "tutor_messages": sum(1 for r in transcript if r.get("role") == "tutor_model"),
+        # novice: the expert rules applied this flight and the ones to practise next (Module 3)
+        **({"mastery": mastery(session_id)} if meta.get("mode") in ("novice", "tutor") else {}),
         "events_count": len(events),
         "telemetry_samples": len(telemetry),
     }

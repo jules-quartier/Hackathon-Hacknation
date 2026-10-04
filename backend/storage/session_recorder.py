@@ -52,6 +52,8 @@ class SessionRecorder:
 
         self.root.mkdir(parents=True, exist_ok=True)
         self.frames_dir.mkdir(parents=True, exist_ok=True)
+        if self.meta_path.exists():
+            return  # an existing session opened again (get_session): keep its start time and mode
 
         self.meta_path.write_text(
             json.dumps(
@@ -100,6 +102,11 @@ class SessionRecorder:
         if self.summary_path.exists():
             return json.loads(self.summary_path.read_text(encoding="utf-8"))
         return None
+
+    def update_meta(self, **fields: Any) -> None:
+        meta = json.loads(self.meta_path.read_text(encoding="utf-8")) if self.meta_path.exists() else {}
+        meta.update(fields)
+        self.meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
     def stop(self) -> None:
         if self.meta_path.exists():
@@ -151,3 +158,43 @@ def replay_state(session_id: str, t: float) -> dict[str, Any] | None:
     if not rows:
         return None
     return min(rows, key=lambda r: abs(float(r.get("t", 0.0)) - t))
+
+
+def valid_session_id(session_id: str) -> bool:
+    """Session ids are made of letters, digits and dashes: nothing that could leave SESSIONS_DIR."""
+    return bool(session_id) and all(c.isalnum() or c in "-_" for c in session_id)
+
+
+def frame_path(session_id: str, t: float, max_gap_s: float = 6.0) -> Path | None:
+    """The camera frame recorded closest to sim time t (frames are saved every ~2 s), or None."""
+    if not valid_session_id(session_id):
+        return None
+    frames_dir = SESSIONS_DIR / session_id / "frames"
+    if not frames_dir.is_dir():
+        return None
+    best, best_gap = None, max_gap_s
+    for f in frames_dir.glob("frame_*.jpg"):
+        try:
+            gap = abs(int(f.stem.split("_")[1]) / 10.0 - t)
+        except (IndexError, ValueError):
+            continue
+        if gap <= best_gap:
+            best, best_gap = f, gap
+    return best
+
+
+def session_meta(session_id: str) -> dict[str, Any]:
+    if not valid_session_id(session_id):
+        return {}
+    path = SESSIONS_DIR / session_id / "meta.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def append_transcript(session_id: str, item: dict[str, Any]) -> None:
+    """Add to a finished session's transcript (the debrief happens after End Flight)."""
+    root = SESSIONS_DIR / session_id
+    if valid_session_id(session_id) and root.is_dir():
+        _append_jsonl(root / "transcript.jsonl", item)

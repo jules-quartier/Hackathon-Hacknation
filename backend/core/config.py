@@ -55,3 +55,16 @@ QUESTION_COOLDOWN_S = float(os.getenv("QUESTION_COOLDOWN_S", "15.0"))
 # The browser sends a camera frame every ~2 s; older frames are not shown to the observer.
 OBSERVER_FRAME_MAX_AGE_S = float(os.getenv("OBSERVER_FRAME_MAX_AGE_S", "5.0"))
 UNANSWERED_QUESTION_TIMEOUT_S = float(os.getenv("UNANSWERED_QUESTION_TIMEOUT_S", "30.0"))
+
+# The pilot talking (voice-activity detection in the browser): no question until they have been
+# silent this long, so the apprentice never talks over them.
+QUIET_AFTER_SPEECH_S = float(os.getenv("QUIET_AFTER_SPEECH_S", "2.5"))
+
+# Spoken debrief after an expert flight (Module 2): gap questions, then a teach-back
+DEBRIEF_MIN_QUESTIONS = 3
+DEBRIEF_MAX_QUESTIONS = 5
+TEACHBACK_MAX_ROUNDS = 3  # explain back, correct, explain again... then stop asking
+
+# Novice tutor (Module 3): "what would the expert do here?" before a decision point
+PREDICT_MIN_GAP_S = 25.0
+PREDICT_MAX_PER_FLIGHT = 4

@@ -29,6 +29,15 @@ type Summary = {
   key_maneuvers?: string[];
   operational_summary?: string;
   coaching_points?: string[];
+  mastery?: Mastery;
+};
+
+type MasteryItem = { slot: string; name: string; why: string[]; expert_rule: string; expert_words?: string | null };
+type Mastery = {
+  mastered: MasteryItem[];
+  practice: MasteryItem[];
+  not_practised: string[];
+  quiz: { asked: number; right: number; partly: number; wrong: number };
 };
 
 type ComparisonReport = {
@@ -155,6 +164,50 @@ export function FlightComparison({ currentSessionId }: { currentSessionId: strin
               </div>
             ) : null}
           </div>
+          {s.mastery && (s.mastery.mastered.length > 0 || s.mastery.practice.length > 0 || s.mastery.quiz.asked > 0) && (
+            <div className="section mastery">
+              {s.mastery.quiz.asked > 0 && (
+                <p className="dim" style={{ marginTop: 8 }}>
+                  Predicted the expert's decision: {s.mastery.quiz.right} right, {s.mastery.quiz.partly} almost, {s.mastery.quiz.wrong} wrong (
+                  {s.mastery.quiz.asked} asked)
+                </p>
+              )}
+              <div className="two-col">
+                <div>
+                  <h4>Mastered</h4>
+                  {s.mastery.mastered.length ? (
+                    s.mastery.mastered.map((m) => (
+                      <div key={m.slot} className="mastery-item ok">
+                        <b>✓ {m.name}</b>
+                        <span>{m.why[0]}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="dim">Nothing yet.</p>
+                  )}
+                </div>
+                <div>
+                  <h4>Practice next</h4>
+                  {s.mastery.practice.length ? (
+                    s.mastery.practice.map((m) => (
+                      <div key={m.slot} className="mastery-item warn">
+                        <b>↻ {m.name}</b>
+                        <span>{m.why[0]}</span>
+                        {m.expert_words ? <em>The expert: “{m.expert_words}”</em> : <em>The expert: {m.expert_rule}</em>}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="dim">Nothing to repeat.</p>
+                  )}
+                </div>
+              </div>
+              {s.mastery.not_practised.length > 0 && (
+                <p className="dim" style={{ marginTop: 6 }}>
+                  Not practised this flight: {s.mastery.not_practised.join(", ")}.
+                </p>
+              )}
+            </div>
+          )}
           {s.knowledge_learned?.length ? (
             <div className="section">
               <h4>Rules taught this flight</h4>

@@ -47,6 +47,7 @@ class KnowledgeManager:
         measured_task: str | None = None,
         session: str | None = None,
         t: float = 0.0,
+        phase: str = "live",
     ) -> dict[str, Any]:
         entries = competence_store.load()
         target = None
@@ -106,6 +107,7 @@ class KnowledgeManager:
             t=t,
             about_deviation=bool(deviation),
             observed_times=int(hypothesis["n"]) if confirmed_habit else 0,
+            phase=phase,
         )
         return {
             **result,

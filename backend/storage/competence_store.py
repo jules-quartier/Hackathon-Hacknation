@@ -2,7 +2,10 @@
 
 data/knowledge/competence.json maps "task.slot" to
   {rule, conditions, reason, confidence ("once" | "confirmed"), confirmations,
-   evidence {metric: value}, learned_in {session, t}, answers [{q, a}]}.
+   evidence {metric: value}, learned_in {session, t}, answers [{q, a, t, session, phase}],
+   teachback {session, confirmed}}.
+answers keep the expert's own words with the moment they refer to (phase: live question, note,
+debrief or teach-back), so the Work Map and the tutor can quote them and replay that moment.
 A filled slot with evidence is checked against later episodes of the same task: the same
 behaviour confirms it, a different one becomes a deviation the observer asks about.
 The filled slots are also written into knowledge.md so the tutor and the debrief use them.
@@ -55,6 +58,42 @@ def reset() -> None:
     _save({})
 
 
+def forget(key: str) -> bool:
+    """Take one rule off the record (the expert asked to forget it). True if it existed."""
+    with _lock:
+        entries = load()
+        if key not in entries:
+            return False
+        del entries[key]
+        _save(entries)
+        return True
+
+
+def mark_teachback(keys: list[str], session: str | None) -> None:
+    """The expert confirmed the apprentice's explanation of these rules."""
+    with _lock:
+        entries = load()
+        for key in keys:
+            if key in entries:
+                entries[key]["teachback"] = {"session": session, "confirmed": True}
+        _save(entries)
+
+
+def quote(entry: dict[str, Any]) -> dict[str, Any] | None:
+    """The expert's own words behind a rule: the latest real answer, with its moment."""
+    for said in reversed(entry.get("answers") or []):
+        if str(said.get("a", "")).strip() and not str(said.get("a")).startswith("("):
+            learned = entry.get("learned_in") or {}
+            return {
+                "text": said["a"],
+                "question": said.get("q", ""),
+                "t": said.get("t", learned.get("t")),
+                "session": said.get("session", learned.get("session")),
+                "phase": said.get("phase", "live"),
+            }
+    return None
+
+
 def coverage() -> dict[str, int]:
     """Gauge numbers, cached: the state broadcast reads them 30 times a second."""
     global _coverage
@@ -105,6 +144,7 @@ def fill(
     t: float,
     about_deviation: bool,
     observed_times: int = 0,
+    phase: str = "live",
 ) -> dict[str, Any]:
     """Store the merged rule of a slot. observed_times > 1: the pilot confirmed a habit the apprentice
     had already seen that many times (a hypothesis), so the rule starts out confirmed."""
@@ -116,11 +156,14 @@ def fill(
         if evidence and not (about_deviation and entry["evidence"]):
             entry["evidence"] = evidence
             entry["learned_in"] = {"session": session, "t": round(t, 1)}
+        entry.setdefault("learned_in", {"session": session, "t": round(t, 1)})  # the moment it was first taught
         if observed_times > 1:
             entry["confirmations"] = max(entry.get("confirmations", 0), observed_times - 1)
             entry["confidence"] = "confirmed"
             entry["induced"] = True
-        entry["answers"] = (entry.get("answers", []) + [{"q": question, "a": answer}])[-MAX_ANSWERS_KEPT:]
+        said = {"q": question, "a": answer, "t": round(t, 1), "session": session, "phase": phase}
+        entry["answers"] = (entry.get("answers", []) + [said])[-MAX_ANSWERS_KEPT:]
+        entry.pop("teachback", None)  # changed since the last teach-back: to be explained back again
         entries[key] = entry
         _save(entries)
         return entry

@@ -632,3 +632,88 @@ kbd {
 .ar-tag.done span { color: var(--green); }
 .ar-tag.near { border-color: var(--cyan); box-shadow: var(--glow-cyan); }
 .ar-tag::after { content: ""; position: absolute; left: 50%; bottom: -10px; width: 1px; height: 10px; background: rgba(160, 200, 255, 0.6); }
+
+/* ---------- trust: off the record ---------- */
+.btn-ghost.offrec.active { color: var(--amber); border-color: var(--amber); box-shadow: 0 0 10px rgba(255, 181, 71, 0.4); }
+.offrec-badge {
+  position: absolute; top: 64px; left: 50%; transform: translateX(-50%); z-index: 5; pointer-events: none;
+  padding: 4px 12px; border-radius: 8px; border: 1px solid var(--amber); background: rgba(70, 45, 0, 0.75);
+  font-family: var(--font-ui); font-weight: 700; font-size: 12px; letter-spacing: 0.2em; color: var(--amber);
+  animation: blink 1.6s infinite;
+}
+
+/* ---------- Module 3: the expert's moment, replayed when the tutor steps in ---------- */
+.moment-card {
+  position: absolute; left: 12px; bottom: 150px; z-index: 6; width: 320px; padding: 10px 12px 12px;
+  border-radius: var(--radius); border: 1px solid rgba(61, 255, 162, 0.55); background: var(--glass-strong);
+  box-shadow: 0 0 22px rgba(61, 255, 162, 0.25); backdrop-filter: blur(10px); animation: rise 0.3s ease-out;
+}
+.moment-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.moment-head .eyebrow { color: var(--green); }
+.moment-head .mono { font-size: 10px; flex: 1; }
+.moment-close { border: 0; background: none; cursor: pointer; color: var(--text-3); font-size: 13px; }
+.moment-close:hover { color: #fff; }
+.moment-card img { display: block; width: 100%; border-radius: 8px; border: 1px solid var(--line-2); margin-bottom: 8px; }
+.moment-rule { font-size: 12.5px; line-height: 1.45; color: var(--text); }
+.moment-rule b { display: block; font-family: var(--font-ui); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--green); margin-bottom: 2px; }
+.moment-card blockquote, .wm-quote { margin: 8px 0 0; padding: 6px 10px; border-left: 3px solid var(--green); background: rgba(10, 60, 40, 0.3); border-radius: 0 8px 8px 0; font-size: 13px; line-height: 1.45; color: #dfffee; font-style: italic; }
+.moment-card cite, .wm-quote cite { display: flex; align-items: center; gap: 8px; margin-top: 3px; font-style: normal; font-family: var(--font-ui); font-size: 11px; letter-spacing: 0.06em; color: var(--text-3); }
+
+/* ---------- Module 2: spoken debrief ---------- */
+.debrief-card { border-color: rgba(167, 128, 255, 0.4); }
+.gap-track { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.gap-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--violet); background: transparent; }
+.gap-dot.guard { border-radius: 3px; transform: rotate(45deg) scale(0.85); }
+.gap-dot.answered { background: var(--green); border-color: var(--green); box-shadow: var(--glow-green); }
+.gap-dot.skipped { background: rgba(95, 117, 145, 0.5); border-color: rgba(95, 117, 145, 0.7); }
+.gap-count { margin-left: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--text-2); }
+.teachback { margin-top: 10px; padding: 9px 11px; border-radius: 10px; border: 1px solid rgba(167, 128, 255, 0.4); background: rgba(50, 25, 100, 0.25); }
+.teachback.ok { border-color: rgba(61, 255, 162, 0.5); background: rgba(10, 60, 40, 0.25); }
+.teachback p { margin: 4px 0 0; font-size: 13px; line-height: 1.5; color: var(--text); }
+.tb-head { font-family: var(--font-ui); font-weight: 700; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--violet); }
+.tb-head b { color: var(--green); letter-spacing: 0.08em; }
+.tb-head b.pending { color: var(--amber); }
+.done-when { margin: 8px 0; font-size: 11.5px; color: var(--text-3); }
+
+/* ---------- Module 2: the Work Map ---------- */
+.workmap .wm-select { width: auto; max-width: 230px; }
+.wm-counts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.wm-timeline { position: relative; display: flex; flex-direction: column; gap: 2px; padding-left: 4px; }
+.wm-timeline::before { content: ""; position: absolute; left: 58px; top: 8px; bottom: 8px; width: 2px; background: var(--line-2); }
+.wm-step { display: grid; grid-template-columns: 46px 14px 1fr auto; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; border: 1px solid transparent; background: none; cursor: pointer; text-align: left; }
+.wm-step:hover { background: rgba(59, 232, 255, 0.06); }
+.wm-step.open { border-color: var(--line-strong); background: rgba(59, 232, 255, 0.08); }
+.wm-step.off { opacity: 0.45; }
+.wm-time { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); }
+.wm-dot { position: relative; z-index: 1; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--cyan); background: var(--bg-1); }
+.wm-step.judgment .wm-dot { border-color: var(--amber); background: rgba(255, 181, 71, 0.35); }
+.wm-step.open .wm-dot { background: var(--cyan); box-shadow: var(--glow-cyan); }
+.wm-title { font-family: var(--font-ui); font-weight: 600; font-size: 13px; color: var(--text); }
+.wm-badges { display: flex; gap: 6px; font-style: normal; font-size: 11px; color: var(--amber); }
+.wm-badges i { font-style: normal; }
+.wm-badges .g { color: var(--green); }
+.wm-badges .q { color: var(--violet); font-weight: 700; }
+.wm-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); animation: rise 0.25s ease-out; }
+.wm-frame { margin: 0; }
+.wm-frame img { display: block; width: 100%; border-radius: 9px; border: 1px solid var(--line-2); }
+.wm-frame figcaption { margin-top: 4px; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3); }
+.wm-frame.empty { padding: 18px; text-align: center; border: 1px dashed var(--line-2); border-radius: 9px; font-size: 12px; color: var(--text-3); }
+.wm-rule { color: var(--text) !important; }
+.wm-quote-label { margin-right: 4px; }
+.wm-moment { border: 1px solid rgba(61, 255, 162, 0.45); background: none; border-radius: 6px; padding: 1px 6px; cursor: pointer; font-family: var(--font-mono); font-size: 10px; color: var(--green); }
+.wm-moment:hover { box-shadow: var(--glow-green); }
+.wm-guard { margin-top: 8px; padding: 8px 10px; border-radius: 9px; border: 1px solid rgba(61, 255, 162, 0.3); background: rgba(3, 10, 20, 0.45); font-size: 13px; line-height: 1.45; color: var(--text-2); }
+.wm-guard b { color: var(--green); font-family: var(--font-ui); letter-spacing: 0.04em; margin-right: 4px; }
+.wm-guard.soft { border-color: var(--line); }
+.wm-guard.soft b { color: var(--cyan); }
+.wm-cond { margin-top: 3px; color: #d5c4ff; font-size: 12.5px; }
+.wm-tb { margin-left: 6px; color: var(--green); font-weight: 700; }
+
+/* ---------- Module 3: mastery after a novice flight ---------- */
+.mastery-item { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line); background: rgba(3, 10, 20, 0.45); font-size: 12.5px; line-height: 1.4; color: var(--text-2); }
+.mastery-item b { font-family: var(--font-ui); letter-spacing: 0.04em; }
+.mastery-item.ok b { color: var(--green); }
+.mastery-item.warn { border-color: rgba(255, 181, 71, 0.4); }
+.mastery-item.warn b { color: var(--amber); }
+.mastery-item em { color: #dfffee; font-size: 12px; }
+.cell-detail .said { color: #dfffee; font-style: italic; border-left: 3px solid var(--green); padding-left: 8px; }

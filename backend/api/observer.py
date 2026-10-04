@@ -21,6 +21,7 @@ from backend.core.config import (
     OBSERVER_TICK_S,
     OBSERVER_WINDOW_S,
     QUESTION_COOLDOWN_S,
+    QUIET_AFTER_SPEECH_S,
     UNANSWERED_QUESTION_TIMEOUT_S,
 )
 from backend.core.state import runtime
@@ -46,16 +47,31 @@ def _pilot_recording(t: float) -> bool:
     return since is not None and t - since < PILOT_NOTE_MAX_S
 
 
+def _pilot_talking(t: float) -> bool:
+    """The pilot is talking, or stopped less than QUIET_AFTER_SPEECH_S ago: never talk over them."""
+    return runtime.pilot_quiet_for(t) < QUIET_AFTER_SPEECH_S
+
+
+def _pilot_busy() -> bool:
+    """A delicate manoeuvre (the expert's equivalent of typing): close to an obstacle or a predicted
+    conflict. Checked locally, so no Claude call is spent on a moment the pilot cannot answer."""
+    s = runtime.drone.snapshot()
+    risky = (runtime.flight_log.prediction or {}).get("risk") in ("medium", "high")
+    return risky or min(s["cable_dist"], s["tree_dist"], s["pylon_dist"]) < 2.5
+
+
 def _can_ask(t: float) -> bool:
     return (
         runtime.mode == "expert"
         and runtime.session_active
+        and not runtime.off_record
         and not runtime.observer_busy
         and runtime.drone.altitude > 0.4
         and runtime.flight_log.duration >= OBSERVER_WINDOW_S
         and t - runtime.last_question_time >= QUESTION_COOLDOWN_S
         and not _awaiting_answer(t)
         and not _pilot_recording(t)
+        and not _pilot_talking(t)
     )
 
 
@@ -78,7 +94,12 @@ def review_episodes() -> None:
     if runtime.mode != "expert" or not runtime.session_active:
         return
     asked = {qa.get("slot") for qa in runtime.qa_history if qa.get("kind") == "deviation"}
+    off = list(runtime.off_record_windows)
+    if runtime.off_record and runtime.off_record_since is not None:
+        off.append([runtime.off_record_since, runtime.drone.elapsed_time])
     for ep in episodes:
+        if any(a <= ep.end and ep.start <= b for a, b in off):
+            continue  # flown off the record: not a habit to learn from, not a rule to check
         episode_store.append(_session_id(), ep.task, ep.start, ep.duration, ep.signature, ep.target)
         for r in competence_store.review_episode(ep.task, ep.signature, ep.start, _session_id()):
             logger.info("rule check %s: %s (expected %s, now %s)", r["slot"], r["status"], r["expected"], r["now"])
@@ -209,6 +230,9 @@ async def observe_once(force: bool = False, moment: attention.Moment | None = No
     if _pilot_recording(t) and not force:
         logger.info("observer: the pilot started a note during the call, question dropped")
         return None
+    if runtime.off_record:
+        logger.info("observer: the flight went off the record during the call, question dropped")
+        return None
     if runtime.recorder:
         runtime.recorder.record_observation({"t": t, "forced": force, "why_now": moment.reasons, **decision.model_dump()})
     await broadcast({"type": "observation", "t": t, "observation": decision.observation, "asked": decision.ask_question})
@@ -241,6 +265,8 @@ def _publish_attention(t: float, moment: attention.Moment | None) -> dict[str, A
         "thinking": runtime.observer_busy,
         "waiting_answer": _awaiting_answer(t),
         "follow_up": bool(runtime.pending_follow_up),
+        "pilot_talking": _pilot_talking(t),
+        "off_record": runtime.off_record,
     })
     if summary == runtime.attention:
         return None
@@ -256,7 +282,7 @@ async def observer_loop() -> None:
             if runtime.mode != "expert" or not runtime.session_active:
                 continue
             t = runtime.drone.elapsed_time
-            moment = assess(t)
+            moment = None if runtime.off_record else assess(t)  # off the record: nothing is noticed
             changed = _publish_attention(t, moment)
             if changed:
                 await broadcast({"type": "attention", **changed})
@@ -267,6 +293,7 @@ async def observer_loop() -> None:
                 payload = _ask_follow_up(t)  # None while waiting for a calm moment
             elif (
                 runtime.observer.is_available
+                and not _pilot_busy()
                 and moment is not None
                 and moment.score >= attention.ASK_THRESHOLD
                 and t - runtime.last_observer_call >= OBSERVER_INTERVAL_S

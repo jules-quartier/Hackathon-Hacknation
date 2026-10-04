@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from backend.core.config import CABLE_DANGER_M, ROAD_MIN_CROSSING_ALT_M, TUTOR_MODEL
 from backend.llm.client import LLMClient
+from backend.llm.teach import HAZARD_TOPIC, caught_explanation, expert_moment
 from backend.sim.predictor import ACTIONS
 from backend.storage import competence_store
 from backend.storage.knowledge_store import get_knowledge
@@ -52,6 +53,7 @@ def safety_alert(telemetry: dict[str, Any]) -> dict[str, Any] | None:
             "category": "safety_alert",
             "urgency": "high",
             "knowledge_reference": f"Cable standoff: never closer than {DANGER_CABLE_DIST_M:.0f} m",
+            "caught": "cable",  # the expert's moment is attached when the alert is spoken (server._speak_alert)
         }
     if closing > CLOSING_SPEED_MS:
         return {
@@ -83,14 +85,48 @@ def expert_rule(slot: str) -> str | None:
 _HAZARD = {"cable": "a cable", "tower": "the tower", "tree": "a tree", "ground": "the ground"}
 
 
+def caught_topic(event: dict[str, Any]) -> str | None:
+    """The situation a predicted mistake belongs to, for the expert's rule and moment."""
+    kind = event.get("type")
+    if kind == "road_ahead":
+        return "road" if event.get("low") else None
+    if kind == "cannot_stop":
+        return "speed"
+    if kind in ("conflict_predicted", "guardian_engaged"):
+        return HAZARD_TOPIC.get(str(event.get("hazard") or ""))
+    if kind == "very_close_cable":
+        return "cable"
+    return None
+
+
 def predictive_alert(event: dict[str, Any]) -> dict[str, Any] | None:
-    """Instant spoken alert for a predicted danger (no LLM): road ahead, conflict, overspeed, Guardian."""
+    """Instant spoken alert for a predicted danger (no LLM). A predicted mistake (low over the road)
+    also says what the expert does there and why; "caught" names the situation, so the expert's
+    moment can be replayed with it."""
+    alert = _predictive_alert(event)
+    topic = caught_topic(event)
+    if alert and topic:
+        alert["caught"] = topic
+    return alert
+
+
+def attach_expert_moment(alert: dict[str, Any]) -> dict[str, Any]:
+    """Add the expert's rule, words and screen moment for the situation the alert caught."""
+    topic = alert.get("caught")
+    moment = expert_moment(topic) if topic else None
+    if moment:
+        alert = {**alert, "replay": moment, "knowledge_reference": f"Expert rule: {moment['slot_name']}"}
+    return alert
+
+
+def _predictive_alert(event: dict[str, Any]) -> dict[str, Any] | None:
     kind = event.get("type")
     if kind == "road_ahead":
         rule = expert_rule("road_crossing.crossing_rule")
         if event.get("low"):
             act = ACTIONS.get(event.get("action") or "brake_climb", ACTIONS["brake_climb"])["say"]
-            speech = f"Road ahead in {event['in_s']:.0f} seconds and you are only {event['alt']:.0f} metres up: {act}."
+            speech = f"Road ahead in {event['in_s']:.0f} seconds and you are only {event['alt']:.0f} metres up: {act}." \
+                + caught_explanation("road")
         else:
             speech = f"Road ahead in {event['in_s']:.0f} seconds: cross straight and quickly, never hover over traffic."
         return {"speech": speech, "category": "safety_alert", "urgency": "medium" if event.get("low") else "low",
@@ -234,8 +270,15 @@ class Advisor:
         tel = {k: v for k, v in telemetry.items() if k not in ("quat", "rpy", "acc", "wind", "nearest_cable_point")}
         forecast = {k: v for k, v in (prediction or {}).items() if k not in ("path", "stop_point")}
 
+        words = []
+        for slot, entry in competence_store.load().items():
+            said = competence_store.quote(entry)
+            if said:
+                words.append({"rule": competence_store.slot_name(slot), "expert_said": said["text"][:300]})
         prompt = (
             f"Knowledge Base (knowledge.md):\n{knowledge}\n\n"
+            f"The expert's own words, per rule (quote them when you explain why):\n"
+            f"{json.dumps(words[-14:], ensure_ascii=False, separators=(',', ':'))}\n\n"
             f"Current Telemetry:\n{json.dumps(tel, separators=(',', ':'))}\n\n"
             f"3-second forecast (risk, predicted conflict, recommended manoeuvre, road ahead, stopping distance):\n"
             f"{json.dumps(forecast or None, separators=(',', ':'))}\n\n"

@@ -41,3 +41,13 @@ async def reset_competence() -> dict[str, Any]:
     competence_store.reset()
     episode_store.reset()
     return competence_store.grid_view()
+
+
+@router.delete("/competence/{slot}")
+async def forget_rule(slot: str) -> dict[str, Any]:
+    """Take one rule off the record: the expert asked the apprentice to forget it."""
+    if slot not in competence_store.SLOTS:
+        raise HTTPException(status_code=404, detail="Unknown slot")
+    if not competence_store.forget(slot):
+        raise HTTPException(status_code=404, detail="Nothing learned in this slot")
+    return competence_store.grid_view()

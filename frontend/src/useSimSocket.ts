@@ -85,6 +85,22 @@ export type Attention = {
   thinking: boolean;
   waiting_answer: boolean;
   follow_up: boolean;
+  pilot_talking?: boolean;
+  off_record?: boolean;
+};
+
+/** The expert's rule for a situation, in their words, with the moment of their flight it was taught at. */
+export type ExpertMoment = {
+  slot: string;
+  slot_name: string;
+  rule: string;
+  reason?: string;
+  quote?: string | null;
+  question?: string | null;
+  phase?: string | null;
+  session?: string | null;
+  t?: number | null;
+  frame: boolean;
 };
 
 export type AIAdvice = {
@@ -92,6 +108,19 @@ export type AIAdvice = {
   category: "safety_alert" | "technique_tip" | "qa_response";
   urgency: "low" | "medium" | "high";
   knowledge_reference: string;
+  caught?: string; // the situation of a mistake the tutor caught before it happened
+  replay?: ExpertMoment; // the expert's moment to show with it
+};
+
+/** Novice tutor: "what would the expert do here?" (predict) or "why would the expert not...?" (why). */
+export type PredictQuestion = {
+  id: string;
+  topic: string;
+  slot: string;
+  slot_name: string;
+  kind: "predict" | "why";
+  question: string;
+  t: number;
 };
 
 export function useSimSocket() {
@@ -101,6 +130,8 @@ export function useSimSocket() {
   const [latestAdvice, setLatestAdvice] = useState<AIAdvice | null>(null);
   const [latestObservation, setLatestObservation] = useState<AIObservation | null>(null);
   const [attention, setAttention] = useState<Attention | null>(null);
+  const [latestPrediction, setLatestPrediction] = useState<PredictQuestion | null>(null);
+  const [offRecord, setOffRecord] = useState(false);
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -117,12 +148,17 @@ export function useSimSocket() {
       ws.onmessage = (msg) => {
         try {
           const data = JSON.parse(msg.data);
-          if (data.type === "state") setState(data);
+          if (data.type === "state") {
+            setState(data);
+            if (!data.session_active) setOffRecord(false);
+          }
           else if (data.type === "event") setEvents((prev) => [...prev.slice(-99), data.event]);
           else if (data.type === "question") setLatestQuestion(data);
           else if (data.type === "advice") setLatestAdvice(data);
           else if (data.type === "observation") setLatestObservation(data);
           else if (data.type === "attention") setAttention(data);
+          else if (data.type === "predict") setLatestPrediction(data);
+          else if (data.type === "off_record") setOffRecord(!!data.active);
         } catch (e) {
           console.error("WS parse error:", e);
         }
@@ -151,7 +187,14 @@ export function useSimSocket() {
       latestAdvice,
       latestObservation,
       attention,
+      latestPrediction,
+      offRecord,
       connected,
+      /** Voice-activity detection: the pilot started or stopped talking (nothing else is sent). */
+      sendVoiceActivity: (speaking: boolean) => {
+        const ws = wsRef.current;
+        if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "voice", speaking }));
+      },
       sendKeys: (down: string[]) => {
         const ws = wsRef.current;
         if (ws?.readyState === WebSocket.OPEN) {
@@ -165,7 +208,7 @@ export function useSimSocket() {
         }
       },
     }),
-    [events, state, latestQuestion, latestAdvice, latestObservation, attention, connected]
+    [events, state, latestQuestion, latestAdvice, latestObservation, attention, latestPrediction, offRecord, connected]
   );
 
   return api;

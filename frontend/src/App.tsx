@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
+import { ExpertMomentCard } from "./ExpertMoment";
 import { FlightComparison } from "./FlightComparison";
 import { Hud } from "./Hud";
 import { KnowledgeViewer } from "./KnowledgeViewer";
 import { MiniMap } from "./MiniMap";
 import { Scene3D, SceneData } from "./Scene3D";
 import { VoicePanel } from "./VoicePanel";
-import { useSimSocket } from "./useSimSocket";
+import { WorkMapView } from "./WorkMapView";
+import { ExpertMoment, useSimSocket } from "./useSimSocket";
 import { primeMicrophone } from "./recordAnswer";
 import { API_URL } from "./config";
 
@@ -41,8 +43,23 @@ export function App() {
   const [tab, setTab] = useState<Tab>("ai");
   const [kbRefreshKey, setKbRefreshKey] = useState<number>(0);
   const [guardianOn, setGuardianOn] = useState(true);
+  const [replay, setReplay] = useState<ExpertMoment | null>(null); // the expert's moment shown when the tutor steps in
+  const [workMapKey, setWorkMapKey] = useState(0);
 
-  const { state, events, latestQuestion, latestAdvice, latestObservation, attention, connected, sendKeys, sendFrame } = useSimSocket();
+  const {
+    state,
+    events,
+    latestQuestion,
+    latestAdvice,
+    latestObservation,
+    attention,
+    latestPrediction,
+    offRecord,
+    connected,
+    sendKeys,
+    sendFrame,
+    sendVoiceActivity,
+  } = useSimSocket();
   const lastFrameSendTime = useRef<number>(0);
 
   // Flight path since take-off: points spaced TRAIL_SPACING_M apart, cleared on Start or sim reset
@@ -137,6 +154,7 @@ export function App() {
       setSessionId(body.session_id);
       setInspected(new Set());
       setTrail([]);
+      setReplay(null);
       setTab("ai");
       loadScene();
       (document.querySelector("section.viewport") as HTMLElement | null)?.focus();
@@ -151,7 +169,9 @@ export function App() {
       if (!res.ok) return;
       const body = await res.json();
       setSessionId(body.session_id);
-      setTab("debrief");
+      setWorkMapKey((k) => k + 1);
+      // expert: the spoken debrief runs in the Apprentice tab, then opens the Work Map; novice: straight to the debrief
+      if (body.mode !== "expert") setTab("debrief");
     } catch (err) {
       console.error("Failed to stop session:", err);
     }
@@ -272,6 +292,8 @@ export function App() {
             cableDist={state?.cable_dist}
           />
           <Hud state={state} scene={scene} mode={mode} inspected={inspected} defectsFound={defectsFound} sessionActive={sessionActive} />
+          {offRecord && sessionActive && <div className="offrec-badge">● OFF THE RECORD</div>}
+          {replay && <ExpertMomentCard moment={replay} onClose={() => setReplay(null)} />}
           <div className="hud-card minimap-card" style={{ pointerEvents: "none" }}>
             <div className="map-title">
               <span className="eyebrow">Tactical map</span>
@@ -310,10 +332,24 @@ export function App() {
               prediction={state?.prediction}
               sessionActive={sessionActive}
               hidden={tab !== "ai"}
+              latestPrediction={latestPrediction}
+              offRecord={offRecord}
               onKnowledgeUpdated={() => setKbRefreshKey((k) => k + 1)}
+              onReplay={setReplay}
+              onDebriefDone={() => {
+                setWorkMapKey((k) => k + 1);
+                setTab("debrief");
+              }}
+              sendVoiceActivity={sendVoiceActivity}
             />
             {tab === "knowledge" && <KnowledgeViewer refreshKey={kbRefreshKey} currentTask={state?.task} />}
-            {tab === "debrief" && <FlightComparison currentSessionId={sessionId} />}
+            {tab === "debrief" && (
+              <div className="debrief">
+                {mode === "expert" && <WorkMapView sessionId={sessionId} refreshKey={workMapKey} />}
+                <FlightComparison currentSessionId={sessionId} />
+                {mode === "novice" && <WorkMapView sessionId={null} refreshKey={workMapKey} />}
+              </div>
+            )}
           </div>
         </aside>
       </main>

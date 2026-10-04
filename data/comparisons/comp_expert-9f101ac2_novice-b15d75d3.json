@@ -1,0 +1,31 @@
+{
+  "expert_session_id": "expert-9f101ac2",
+  "novice_session_id": "novice-b15d75d3",
+  "overall_score": 88.0,
+  "coverage_comparison": {
+    "expert_inspected_count": 0,
+    "novice_inspected_count": 0,
+    "missed_targets": [],
+    "commentary": "Novice inspected 0 insulators against 0 for the expert. No target missed."
+  },
+  "safety_compliance": {
+    "min_cable_distance_expert": 3.51,
+    "min_cable_distance_novice": 3.26,
+    "violations_novice": 0,
+    "guardian_interventions_novice": 0,
+    "compliance_rating": "Excellent",
+    "commentary": "Closest cable approach 3.26 m (expert 3.51 m), 0 violations, 0 Guardian interventions."
+  },
+  "technique_and_stability": {
+    "flight_duration_ratio": 0.57,
+    "hover_discipline": "Hover stability 8.5/10 (expert 8.5/10).",
+    "knowledge_adherence": "Compare the novice's distances and road crossings with the expert rules in the knowledge tab."
+  },
+  "key_strengths": [
+    "Completed the flight."
+  ],
+  "areas_for_improvement": [
+    "Keep every standoff above the safety margins."
+  ],
+  "instructor_verdict": "Overall score 88.0/100, safety rated Excellent."
+}

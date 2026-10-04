@@ -10,6 +10,8 @@ type SlotEntry = {
   confirmations?: number;
   evidence?: Record<string, number>;
   induced?: boolean;
+  answers?: Array<{ q: string; a: string; t?: number; phase?: string }>;
+  teachback?: { confirmed: boolean };
 };
 type GridView = {
   coverage: KnowledgeCoverage;
@@ -66,6 +68,15 @@ export function KnowledgeViewer({ refreshKey, currentTask }: { refreshKey?: numb
     setOpen(null);
     fetchGrid();
     fetchKnowledge();
+  };
+
+  const forget = async (key: string) => {
+    if (!confirm("Forget this rule? The apprentice and the tutor will no longer use it.")) return;
+    const res = await fetch(`${API_URL}/knowledge/competence/${key}`, { method: "DELETE" }).catch(() => null);
+    if (res?.ok) {
+      setGrid(await res.json());
+      fetchKnowledge();
+    }
   };
 
   const save = async () => {
@@ -162,6 +173,16 @@ export function KnowledgeViewer({ refreshKey, currentTask }: { refreshKey?: numb
                   </p>
                 )}
                 {slot.entry.induced && <p className="evid">◆ Induced from the expert's repeated behaviour, then confirmed by the expert.</p>}
+                {slot.entry.teachback?.confirmed && <p className="evid" style={{ color: "var(--green)" }}>✓ Confirmed by the expert in the teach-back.</p>}
+                {(() => {
+                  const said = [...(slot.entry.answers ?? [])].reverse().find((a) => a.a && !a.a.startsWith("("));
+                  return said ? <p className="said">“{said.a}”</p> : null;
+                })()}
+                <div className="row-actions" style={{ marginTop: 6 }}>
+                  <button className="btn btn-sm btn-abort" onClick={() => forget(slot.key)} title="Take this rule off the record">
+                    Forget this rule
+                  </button>
+                </div>
               </>
             ) : (
               <p className="dim">Not learned yet: {slot.learn}</p>
